@@ -1,0 +1,14 @@
+arch:
+	16 X 8bits reg
+	16bits Index reg
+	16bits prog counter
+	16 level stack ????
+	8bits stack pointer
+	2 x 8bits timers
+	4kB Ram
+	64*32 display buffer
+	16 keyboard inputs
+
+PROGRAM_START: 0x200h byte
+
+
