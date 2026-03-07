@@ -51,36 +51,38 @@ impl Chip8 {
     }
 
     pub fn load_rom(&mut self) {
+        let max_ram: usize = (4096 - START_USABLE_RAM).into();
 
         if env::args().count() != 2 {
             panic!("Wrong number of arguments...");
         }
 
         let binary = fs::read(env::args().last().unwrap());
-
-        let max_ram: usize = (4096 - START_USABLE_RAM).into();
-
         if binary.is_err() {
-            return ;
+            panic!("error opening file...");
         }
-        let len_bin = binary.iter().count();
+
+        let len_bin = binary.as_ref().unwrap().len();
         if len_bin > max_ram {
             panic!("File too large...");
         }
-        &mut self.ram[START_USABLE_RAM.into()..(START_USABLE_RAM as usize + len_bin).into()].copy_from_slice(&binary.unwrap());
-        // self.ram.iter().skip(START_USABLE_RAM - 1)
 
+        self.ram[START_USABLE_RAM as usize..(START_USABLE_RAM as usize + len_bin )].clone_from_slice(&binary.unwrap());
     }
 
 }
 
-
+fn print_ram(ram: &[u8]) {
+    for byte in ram {
+        println!("{0} ", byte);
+    }
+}
 
 
 fn main() {
     let mut chip = Chip8::new();
     // fs::read(argv[1);
     chip.load_rom();
-    
+    print_ram(&chip.ram);
     println!("Hello, world! {0}", chip.pc);
 }
