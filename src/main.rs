@@ -50,7 +50,6 @@ async fn main() {
                 ui.label(vec2(screen_width() * 0.5, 10.0), "Main Menu");
                 if ui.button(vec2(screen_width() * 0.5, 275.0), "launch ROM") {
                     // TODO
-                    // let rom = open_rom_dialog();
                     chip.load_rom(open_rom_dialog().unwrap());
                     chip.print_ram();
                 }

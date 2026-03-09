@@ -1,4 +1,4 @@
-arch:
+components:
 	16 X 8bits reg
 	16bits Index reg
 	16bits prog counter
@@ -10,12 +10,16 @@ arch:
 	16 keyboard inputs
 
 PROGRAM_START: 0x200h byte
+display buffer: 0xF00-0xFFF (256)
+call stack: 0xEA0-0xEFF (96)
 
 	- struct
 	- interface
 	- interpreter
 	- 
 
+
+Opcodes:
 
 
 NNN is an address,
@@ -24,12 +28,6 @@ X and Y are two 4 bits constants
 
 
 0NNN Call 1802 machine code program at NNN (not implemented)
-00CN Scroll down N lines (***)
-00FB Scroll 4 pixels right (***)
-00FC Scroll 4 pixels left (***)
-00FD Quit the emulator (***)
-00FE Set CHIP-8 graphic mode (***)
-00FF Set SCHIP graphic mode (***)
 00E0 Erase the screen
 00EE Return from a CHIP-8 sub-routine
 1NNN Jump to NNN
@@ -65,8 +63,6 @@ FX29 I points to the 4 x 5 font sprite of hex char in VX
 FX33 Store BCD representation of VX in M(I)...M(I+2)
 FX55 Save V0...VX in memory starting at M(I)
 FX65 Load V0...VX from memory starting at M(I)
-FX75 Save V0...VX (X<8) in the HP48 flags (***)
-FX85 Load V0...VX (X<8) from the HP48 flags (***)
 
 
 

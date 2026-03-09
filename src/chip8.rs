@@ -1,3 +1,6 @@
+use std::ops::{BitOr, BitXor, Shr};
+use macroquad::{color::BLACK, window::clear_background, *};
+
 const FONT_SET_LEN: usize = 80;
 const FONT_SET: [u8;80] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -21,9 +24,10 @@ const FONT_SET: [u8;80] = [
 const SCREEN_WIDTH: u8 = 64;
 const SCREEN_HEIGHT: u8 = 32;
 const START_USABLE_RAM: u16 = 0x200;
+const END_USABLE_RAM: u16 = 0xEA0;
 const ALL_RAM: u16 = 4096;
-const AVAIBLE_RAM: usize = (ALL_RAM - START_USABLE_RAM) as usize;
-
+const AVAIBLE_RAM: usize = (END_USABLE_RAM - START_USABLE_RAM) as usize;
+const DISPLAY_BUFFER: u16 = 0xF00;
 
 struct Display {
     width: u8,
@@ -74,21 +78,27 @@ impl Chip8 {
     }
 
     pub fn load_rom(&mut self, rom: Vec<u8>) {
-        // let binary = fs::read(env::args().last().unwrap());
-        // if binary.is_err() {
-        //     panic!("error opening file...");
-        // }
-
         let len_bin = rom.len();
         if len_bin > AVAIBLE_RAM {
             panic!("File too large...");
         }
 
-        self.ram[START_USABLE_RAM as usize..(START_USABLE_RAM as usize + len_bin )].clone_from_slice(&rom);
+        self.ram[self.pc as usize..(self.pc as usize + len_bin )].clone_from_slice(&rom);
     }
 
     pub fn interpret(&mut self) {
-
+        for opcode in &self.ram {
+            match opcode.shr(12) {
+                0x0 => {
+                    match opcode.bitor(0xFF00) {
+                        0xE0 => { clear_background(BLACK); self.ram[DISPLAY_BUFFER as usize..ALL_RAM as usize - 1]; }
+                        // 0xEE => { self.pc = }        TODO stack call
+                        _ => panic!("Invalid opcode"),
+                    }
+                }
+                0x1 => { self.pc = opcode.bitxor(0xF000) },
+            }
+        }
     }
 
 	pub fn print_ram(&self) {
