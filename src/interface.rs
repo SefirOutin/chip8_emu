@@ -1,7 +1,9 @@
+
+use std::ops::{BitOr, Shl};
 use macroquad::prelude::*;
 use rfd::FileDialog;
 use macroquad::ui::{hash, root_ui, Skin};
-
+use super::chip8;
 
 pub fn gen_empty_rectangle(
     width: u16,
@@ -26,13 +28,24 @@ pub fn gen_empty_rectangle(
     img
 }
 
-pub fn open_rom_dialog() -> Option<Vec<u8>> {
+pub fn open_rom_dialog() -> Option<Vec<u16>> {
     let file = FileDialog::new()
         .add_filter("Chip8 ROM", &["ch8", "rom", "bin"])
         .pick_file();
 
     if let Some(path) = file {
-        std::fs::read(path).ok()
+        let vec = std::fs::read(path).unwrap();
+        let mut output: Vec<u16> = Vec::new();
+        // output.reserve(additional);
+        for val in vec.chunks(2) {
+            // println!("val: {i}");
+            if val.len() == 2 {
+                output.push(((val[0] as u16).shl(8) as u16).bitor(val[1] as u16));
+            } else {
+                output.push(val[0] as u16);
+            }
+        }
+        Some(output)
     } else {
         None
     }
@@ -90,6 +103,41 @@ pub async fn load_ui() {
     root_ui().push_skin(&ui_skin);
 }
 
-// async pub fn looop() {
-//     loop 
-// }
+fn error_popup(error: &str) {
+    println!("error: {error}.");
+}
+
+pub async fn main_loop(mut chip: chip8::Chip8) {
+    let window_size = vec2(screen_width(), screen_height());
+    
+    loop {
+        clear_background(GRAY);
+        root_ui().window(
+            hash!(),
+            vec2(0.0, 0.0),
+            window_size,
+            |ui| {
+                ui.label(vec2(screen_width() * 0.5, 10.0), "Main Menu");
+                if ui.button(vec2(screen_width() * 0.5, 275.0), "launch ROM") {
+                    // TODO
+                    let file = open_rom_dialog();
+                    if let Some(rom) = file {
+                        chip.load_rom(rom);
+                    } else {
+                        error_popup("loading ROM file");
+                        return; // returns from closure, act as a continue here
+                    }
+                    // chip.print_ram();
+                    chip.interpret();
+                }
+                if ui.button(vec2(screen_width() * 0.5, 350.0), "Quit") {
+                    std::process::exit(0);
+                }
+                if ui.button(vec2(5.0, screen_height() - 50.0), "settings") {
+                    // TODO
+                }
+            },
+        );
+        next_frame().await;
+    }
+}
