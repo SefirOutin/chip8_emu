@@ -1,5 +1,5 @@
 
-use std::ops::{BitOr, Shl};
+use std::{io, ops::{BitOr, Shl}};
 use macroquad::prelude::*;
 use rfd::FileDialog;
 use macroquad::ui::{hash, root_ui, Skin};
@@ -28,24 +28,14 @@ pub fn gen_empty_rectangle(
     img
 }
 
-pub fn open_rom_dialog() -> Option<Vec<u16>> {
+pub fn open_rom_dialog() -> Option<Vec<u8>> {
+
     let file = FileDialog::new()
         .add_filter("Chip8 ROM", &["ch8", "rom", "bin"])
         .pick_file();
 
     if let Some(path) = file {
-        let vec = std::fs::read(path).unwrap();
-        let mut output: Vec<u16> = Vec::new();
-        // output.reserve(additional);
-        for val in vec.chunks(2) {
-            // println!("val: {i}");
-            if val.len() == 2 {
-                output.push(((val[0] as u16).shl(8) as u16).bitor(val[1] as u16));
-            } else {
-                output.push(val[0] as u16);
-            }
-        }
-        Some(output)
+        Some(std::fs::read(path).unwrap())
     } else {
         None
     }
@@ -123,6 +113,7 @@ pub async fn main_loop(mut chip: chip8::Chip8) {
                     let file = open_rom_dialog();
                     if let Some(rom) = file {
                         chip.load_rom(rom);
+                        chip.print_ram();
                     } else {
                         error_popup("loading ROM file");
                         return; // returns from closure, act as a continue here

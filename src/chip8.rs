@@ -2,35 +2,35 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitXor, Shl, ShlAssign, Shr, ShrAssi
 use macroquad::{color::BLACK, window::clear_background, *};
 use rand;
 
-const FONT_SET_LEN: usize = 48;
-const FONT_SET: [u16;FONT_SET_LEN] = [
-    0xF090, 0x9090, 0x00F0, // 0
-	0x2060, 0x2020, 0x0070, // 1
-	0xF010, 0xF080, 0x00F0, // 2
-	0xF010, 0xF010, 0x00F0, // 3
-	0x9090, 0xF010, 0x0010, // 4
-	0xF080, 0xF010, 0x00F0, // 5
-	0xF080, 0xF090, 0x00F0, // 6
-	0xF010, 0x2040, 0x0040, // 7
-	0xF090, 0xF090, 0x00F0, // 8
-	0xF090, 0xF010, 0x00F0, // 9
-	0xF090, 0xF090, 0x0090, // A
-	0xE090, 0xE090, 0x00E0, // B
-	0xF080, 0x8080, 0x00F0, // C
-	0xE090, 0x9090, 0x00E0, // D
-	0xF080, 0xF080, 0x00F0, // E
-	0xF080, 0xF080, 0x0080  // F
+const FONT_SET_LEN: usize = 80;
+const FONT_SET: [u8;FONT_SET_LEN] = [
+    0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+	0x20, 0x60, 0x20, 0x20, 0x70, // 1
+	0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+	0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+	0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+	0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+	0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+	0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+	0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+	0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+	0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+	0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+	0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+	0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+	0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+	0xF0, 0x80, 0xF0, 0x80, 0x80  // F
 ];
 
 const SCREEN_WIDTH: u8 = 64;
 const SCREEN_HEIGHT: u8 = 32;
-// [u8] stored in Vec<u16> so: / 2
-const START_USABLE_RAM: usize = 0x200 / 2;
-const END_USABLE_RAM: usize = 0xEA0 / 2;
-const ALL_RAM: usize = 4096 / 2;
+const START_USABLE_RAM: usize = 0x200;
+const END_USABLE_RAM: usize = 0xEA0;
+const ALL_RAM: usize = 4096;
 const AVAIBLE_RAM: usize = END_USABLE_RAM - START_USABLE_RAM;
-const DISPLAY_BUFFER_START: usize = 0xF00 / 2;
-const FONT_START_ADDR: usize = 0x50 / 2;
+const DISPLAY_BUFFER_START: usize = 0xF00;
+const FONT_START_ADDR: usize = 0x50;
+const SPRITE_WIDTH: u8 = 8;
 
 struct Display {
     width: u8,
@@ -55,7 +55,7 @@ pub struct Chip8 {
     stack_ptr: u8,
     d_timer: u8,
     s_timer: u8,
-    ram: [u16; ALL_RAM],
+    ram: [u8; ALL_RAM],
     key_inputs: [u8; 16],
     display: (u8, u8),
     
@@ -66,7 +66,7 @@ impl Chip8 {
         Self {
             registers: [0; 16],
             addr_reg: 0,
-            pc: START_USABLE_RAM as u16,
+            pc: START_USABLE_RAM as u16 - 1,
             stack: [0; 16],
             // stack: stack { stack: [0; 16] },
             stack_ptr: 0,
@@ -84,7 +84,7 @@ impl Chip8 {
         self.ram[font_start_addr..font_start_addr + FONT_SET_LEN].copy_from_slice(&FONT_SET);
     }
 
-    pub fn load_rom(&mut self, rom: Vec<u16>) {
+    pub fn load_rom(&mut self, rom: Vec<u8>) {
         let len_bin = rom.len();
         if len_bin > AVAIBLE_RAM {
             panic!("File too large...");
@@ -106,14 +106,14 @@ impl Chip8 {
     pub fn interpret(&mut self) {
         loop {
             if self.pc > ALL_RAM as u16 - 1 {
-                self.pc = ALL_RAM as u16 - 1;
+                panic!("invalid prog counter");
             }
-            let opcode = self.ram[self.pc as usize];
+            let opcode: u16 = (self.ram[self.pc as usize] as u16).shl(8) | self.ram[self.pc as usize + 1] as u16;
             match opcode >> 12 {
                 0 => {
                     match opcode.bitand(0x00FF) {
                         0xE0 => { clear_background(BLACK);              // CLS
-                            self.ram[DISPLAY_BUFFER_START as usize..ALL_RAM as usize - 1].fill(0); 
+                            self.ram[DISPLAY_BUFFER_START..].fill(0); 
                         }
 
                         0xEE => { self.pc = self.stack[self.stack_ptr as usize]; self.stack_ptr -= 1; },        // RETURN
@@ -121,8 +121,8 @@ impl Chip8 {
                         _ => { println!("Invalid opcode.0x{:04X}", opcode); return; },
                     }
                 } 
-                0x1 => { self.pc = opcode.bitand(0x0FFF) / 2},     // JP addr
-                0x2 => { self.stack_ptr += 1; self.stack[self.stack_ptr as usize] = self.pc; self.pc = opcode.bitand(0x0FFF) / 2; },        // CALL addr
+                0x1 => { self.pc = opcode.bitand(0x0FFF)},     // JP addr
+                0x2 => { self.stack_ptr += 1; self.stack[self.stack_ptr as usize] = self.pc; self.pc = opcode.bitand(0x0FFF); },        // CALL addr
                 0x3 => { if self.get_reg(parse_l_reg(opcode)) == opcode as u8 { self.pc += 1; } },        // SE Rx, byte
                 0x4 => { if self.get_reg(parse_l_reg(opcode)) != opcode as u8 { self.pc += 1; } },        // SNE Rx, byte
                 0x5 => { if self.get_reg(parse_l_reg(opcode)) == self.get_reg(parse_l_reg(opcode)) { self.pc += 1; } }, // SE Rx, Ry
@@ -180,18 +180,26 @@ impl Chip8 {
                 }
                 0x9 => { if self.get_reg(parse_l_reg(opcode)) != self.get_reg(parse_l_reg(opcode)) { self.pc += 1; } },		// SNE Rx, Ry
                 0xA => self.addr_reg = opcode.bitand(0x0FFF),															// LD Addr_R, addr (12bits)
-                0xB => self.pc = (self.get_reg(0) as u16 + opcode.bitand(0x0FFF)) / 2,									// JMP R0, addr (12bits)
+                0xB => self.pc = self.get_reg(0) as u16 + opcode.bitand(0x0FFF),									// JMP R0, addr (12bits)
                 0xC => *self.get_mut_reg(parse_l_reg(opcode)) &= rand::gen_range(0, 255),						// RND Rx, byte		
                 0xD => {																								// DRW Rx, Ry, nibble
 					let sprite_len = opcode.bitand(0x000F) as usize;
-					let sprite = &self.ram[self.addr_reg as usize..(self.addr_reg as usize + sprite_len)];
-					let (mut x, mut y) = (self.get_reg(parse_l_reg(opcode)), self.get_reg(parse_r_reg(opcode)));
+					let sprite: Vec<u8> =  self.ram[self.addr_reg as usize..(self.addr_reg as usize + sprite_len)].into();
+					let (x, y) = (self.get_reg(parse_l_reg(opcode)), self.get_reg(parse_r_reg(opcode)));
 
-					// let pos = (self.get_reg(parse_l_reg(opcode)) * self.get_reg(parse_r_reg(opcode))) as usize;
-					for (i, pixels) in sprite.iter().enumerate() {		// 2 pixels
-						x += i as u8;
-						if x > SCREEN_WIDTH {
-							x = 0;
+					let reminder = x + SPRITE_WIDTH - SCREEN_WIDTH;
+
+					for line in sprite {		// 2 pixels
+						if y >= SCREEN_HEIGHT {
+							break;
+						}
+						
+						let pos = x * y;
+						
+						if reminder > 0 {
+							*(&mut self.ram[DISPLAY_BUFFER_START + pos as usize]) ^= line.shr(reminder);
+						} else {
+							self.ram[DISPLAY_BUFFER_START + pos as usize] ^= line;
 						}
 					}
 					// for bytes in self.ram[pos..pos + sprite_len].into_iter() {
@@ -199,20 +207,20 @@ impl Chip8 {
 					// }
 				},
                 0xE => match opcode as u8 {
-					0x9E => ,
-					0xA1 => ,
+					0x9E => println!("opcode.0x{:04X}", opcode),
+					0xA1 => println!("opcode.0x{:04X}", opcode),
 					_ => { println!("Invalid opcode.0x{:04X}", opcode); return; },
 				}
                 0xF => match opcode as u8 {
-					0x07 => ,
-					0x0A => ,
-					0x15 => ,
-					0x18 => ,
-					0x1E => ,
-					0x29 => ,
-					0x33 => ,
-					0x55 => ,
-					0x65 => ,
+					0x07 => println!("opcode.0x{:04X}", opcode),
+					0x0A => println!("opcode.0x{:04X}", opcode),
+					0x15 => println!("opcode.0x{:04X}", opcode),
+					0x18 => println!("opcode.0x{:04X}", opcode),
+					0x1E => println!("opcode.0x{:04X}", opcode),
+					0x29 => println!("opcode.0x{:04X}", opcode),
+					0x33 => println!("opcode.0x{:04X}", opcode),
+					0x55 => println!("opcode.0x{:04X}", opcode),
+					0x65 => println!("opcode.0x{:04X}", opcode),
 					_ => { println!("Invalid opcode.0x{:04X}", opcode); return; },
 
 				}
@@ -220,13 +228,13 @@ impl Chip8 {
             }
             self.print_state();
             self.pc += 1;
-            println!("opcode: 0x{:02X}", opcode);
+            println!("opcode: 0x{:04X}", opcode);
         }
     }
 
 	pub fn print_ram(&self) {
         for bytes in self.ram {
-            println!("0x{:02X} 0x{:02X}", bytes >> 8, bytes.bitand(0x00FF));
+            println!("0x{:02X}", bytes);
         }
     }
 
