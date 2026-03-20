@@ -1,6 +1,5 @@
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitXor, Shl, ShlAssign, Shr, ShrAssign};
 use macroquad::{color::BLACK, window::clear_background, *};
-use rand;
 
 const FONT_SET_LEN: usize = 80;
 const FONT_SET: [u8;FONT_SET_LEN] = [
@@ -22,41 +21,35 @@ const FONT_SET: [u8;FONT_SET_LEN] = [
 	0xF0, 0x80, 0xF0, 0x80, 0x80  // F
 ];
 
-const SCREEN_WIDTH: u8 = 64;
-const SCREEN_HEIGHT: u8 = 32;
+pub const SCREEN_WIDTH: u8 = 64;
+pub const SCREEN_HEIGHT: u8 = 32;
+pub const SCREEN_SIZE: u16 = SCREEN_HEIGHT as u16 * SCREEN_WIDTH as u16;
+
 const START_USABLE_RAM: usize = 0x200;
 const END_USABLE_RAM: usize = 0xEA0;
 const ALL_RAM: usize = 4096;
 const AVAIBLE_RAM: usize = END_USABLE_RAM - START_USABLE_RAM;
-const DISPLAY_BUFFER_START: usize = 0xF00;
+pub const DISPLAY_BUFFER_START: usize = 0xF00;
 const FONT_START_ADDR: usize = 0x50;
 const SPRITE_WIDTH: u8 = 8;
+const FETCH_STEP: u16 = 2;
 
-struct Display {
-    width: u8,
-    height: u8,
-}
+const ADDR_MASK: u16 = 0x0FFF;
+const LOW_BYTE_MASK: u16 = 0x00FF;
+// const HIGH_BYTE_MASK: u16 = 0xFF00;
+const N_MASK: u16 = 0x000F;
 
-impl Display {
-    fn new(width: u8, height: u8) -> Self {
-        Self {
-            width: width,
-            height: height,
-        }
-    }
-}
 
 pub struct Chip8 {
     registers: [u8; 16],
     addr_reg: u16,
     pc: u16,
     stack: [u16; 16],
-    // stack: stack,
     stack_ptr: u8,
     d_timer: u8,
     s_timer: u8,
     ram: [u8; ALL_RAM],
-    key_inputs: [u8; 16],
+    key_inputs: [bool; 16],
     display: (u8, u8),
     
 }
@@ -68,12 +61,11 @@ impl Chip8 {
             addr_reg: 0,
             pc: START_USABLE_RAM as u16 - 1,
             stack: [0; 16],
-            // stack: stack { stack: [0; 16] },
             stack_ptr: 0,
             d_timer: 0,
             s_timer: 0,
             ram: [0; ALL_RAM],
-            key_inputs: [0; 16],
+            key_inputs: [false; 16],
             display: (SCREEN_WIDTH, SCREEN_HEIGHT),
         }
     }
@@ -91,6 +83,10 @@ impl Chip8 {
         }
 
         self.ram[self.pc as usize..self.pc as usize + len_bin ].clone_from_slice(&rom);
+    }
+
+    pub fn get_vram(&self) -> & [u8; ALL_RAM] {
+        &self.ram
     }
 
     fn get_reg(&self, x: u8) -> u8{
@@ -111,24 +107,24 @@ impl Chip8 {
             let opcode: u16 = (self.ram[self.pc as usize] as u16).shl(8) | self.ram[self.pc as usize + 1] as u16;
             match opcode >> 12 {
                 0 => {
-                    match opcode.bitand(0x00FF) {
+                    match opcode.bitand(LOW_BYTE_MASK) {
                         0xE0 => { clear_background(BLACK);              // CLS
                             self.ram[DISPLAY_BUFFER_START..].fill(0); 
                         }
 
-                        0xEE => { self.pc = self.stack[self.stack_ptr as usize]; self.stack_ptr -= 1; },        // RETURN
+                        0xEE => { self.pc = self.stack[self.stack_ptr as usize] - FETCH_STEP; self.stack_ptr -= 1; },        // RETURN
                         
                         _ => { println!("Invalid opcode.0x{:04X}", opcode); return; },
                     }
                 } 
-                0x1 => { self.pc = opcode.bitand(0x0FFF)},     // JP addr
-                0x2 => { self.stack_ptr += 1; self.stack[self.stack_ptr as usize] = self.pc; self.pc = opcode.bitand(0x0FFF); },        // CALL addr
-                0x3 => { if self.get_reg(parse_l_reg(opcode)) == opcode as u8 { self.pc += 1; } },        // SE Rx, byte
-                0x4 => { if self.get_reg(parse_l_reg(opcode)) != opcode as u8 { self.pc += 1; } },        // SNE Rx, byte
-                0x5 => { if self.get_reg(parse_l_reg(opcode)) == self.get_reg(parse_l_reg(opcode)) { self.pc += 1; } }, // SE Rx, Ry
-                0x6 => *self.get_mut_reg(parse_l_reg(opcode)) = opcode.bitand(0x00FF) as u8,              // LD Rx, byte
-                0x7 => *self.get_mut_reg(parse_l_reg(opcode)) += opcode.bitand(0x00FF) as u8,             // ADD Rx, byte
-                0x8 => { match opcode.bitand(0x000F) {      // match last 4 bits
+                0x1 => { self.pc = opcode.bitand(ADDR_MASK) - FETCH_STEP},     // JP addr
+                0x2 => { self.stack_ptr += 1; self.stack[self.stack_ptr as usize] = self.pc; self.pc = opcode.bitand(ADDR_MASK) - FETCH_STEP; },        // CALL addr
+                0x3 => { if self.get_reg(parse_l_reg(opcode)) == opcode as u8 { self.pc += FETCH_STEP; } },        // SE Rx, byte
+                0x4 => { if self.get_reg(parse_l_reg(opcode)) != opcode as u8 { self.pc += FETCH_STEP; } },        // SNE Rx, byte
+                0x5 => { if self.get_reg(parse_l_reg(opcode)) == self.get_reg(parse_l_reg(opcode)) { self.pc += FETCH_STEP; } }, // SE Rx, Ry
+                0x6 => *self.get_mut_reg(parse_l_reg(opcode)) = opcode.bitand(LOW_BYTE_MASK) as u8,              // LD Rx, byte
+                0x7 => *self.get_mut_reg(parse_l_reg(opcode)) += opcode.bitand(LOW_BYTE_MASK) as u8,             // ADD Rx, byte
+                0x8 => { match opcode.bitand(N_MASK) {      // match last 4 bits
                     0x0 => *self.get_mut_reg(parse_l_reg(opcode)) = self.get_reg(parse_r_reg(opcode)),                                      // LD Rx, Ry
                     0x1 => *self.get_mut_reg(parse_l_reg(opcode)) |= self.get_reg(parse_r_reg(opcode)),    // OR Rx, Ry
                     0x2 => *self.get_mut_reg(parse_l_reg(opcode)) &= self.get_reg(parse_r_reg(opcode)),     // AND Rx, Ry
@@ -178,33 +174,37 @@ impl Chip8 {
                     
                     }
                 }
-                0x9 => { if self.get_reg(parse_l_reg(opcode)) != self.get_reg(parse_l_reg(opcode)) { self.pc += 1; } },		// SNE Rx, Ry
-                0xA => self.addr_reg = opcode.bitand(0x0FFF),															// LD Addr_R, addr (12bits)
-                0xB => self.pc = self.get_reg(0) as u16 + opcode.bitand(0x0FFF),									// JMP R0, addr (12bits)
-                0xC => *self.get_mut_reg(parse_l_reg(opcode)) &= rand::gen_range(0, 255),						// RND Rx, byte		
+                0x9 => { if self.get_reg(parse_l_reg(opcode)) != self.get_reg(parse_l_reg(opcode)) { self.pc += FETCH_STEP; } },		// SNE Rx, Ry
+                0xA => self.addr_reg = opcode.bitand(ADDR_MASK),															// LD Addr_R, addr (12bits)
+                0xB => self.pc = self.get_reg(0) as u16 + opcode.bitand(ADDR_MASK) - FETCH_STEP,									// JMP R0, addr (12bits)
+                0xC => *self.get_mut_reg(parse_l_reg(opcode)) &= macroquad::rand::gen_range(0, 255),						// RND Rx, byte		
+                
                 0xD => {																								// DRW Rx, Ry, nibble
-					let sprite_len = opcode.bitand(0x000F) as usize;
+					let sprite_len = opcode.bitand(N_MASK) as usize;
 					let sprite: Vec<u8> =  self.ram[self.addr_reg as usize..(self.addr_reg as usize + sprite_len)].into();
 					let (x, y) = (self.get_reg(parse_l_reg(opcode)), self.get_reg(parse_r_reg(opcode)));
 
-					let reminder = x + SPRITE_WIDTH - SCREEN_WIDTH;
+					let reminder: i16 = x as i16 + SPRITE_WIDTH as i16 - SCREEN_WIDTH as i16;
 
-					for line in sprite {		// 2 pixels
+					for line in sprite {
 						if y >= SCREEN_HEIGHT {
 							break;
 						}
 						
 						let pos = x * y;
-						
+						let original_val = self.ram[DISPLAY_BUFFER_START + pos as usize];
 						if reminder > 0 {
 							*(&mut self.ram[DISPLAY_BUFFER_START + pos as usize]) ^= line.shr(reminder);
 						} else {
 							self.ram[DISPLAY_BUFFER_START + pos as usize] ^= line;
 						}
+                        if original_val & !self.ram[DISPLAY_BUFFER_START + pos as usize] != 0 {     // check if bits have been flipped from 1 to 0
+                            *self.get_mut_reg(0xF) = 1;
+                        } else {
+                            *self.get_mut_reg(0xF) = 0;
+                        }
 					}
-					// for bytes in self.ram[pos..pos + sprite_len].into_iter() {
-					// 	bytes ^= sprite[i];
-					// }
+                    
 				},
                 0xE => match opcode as u8 {
 					0x9E => println!("opcode.0x{:04X}", opcode),
@@ -212,22 +212,32 @@ impl Chip8 {
 					_ => { println!("Invalid opcode.0x{:04X}", opcode); return; },
 				}
                 0xF => match opcode as u8 {
-					0x07 => println!("opcode.0x{:04X}", opcode),
+					0x07 => *self.get_mut_reg(parse_l_reg(opcode)) = self.d_timer,      // LD Rx, DTIMER
 					0x0A => println!("opcode.0x{:04X}", opcode),
-					0x15 => println!("opcode.0x{:04X}", opcode),
-					0x18 => println!("opcode.0x{:04X}", opcode),
-					0x1E => println!("opcode.0x{:04X}", opcode),
+					0x15 => self.d_timer = *self.get_mut_reg(parse_l_reg(opcode)),      // LD DTIMER, Rx
+					0x18 => self.s_timer = *self.get_mut_reg(parse_l_reg(opcode)),      // LD STIMER, Rx
+					0x1E => self.addr_reg += self.get_reg(parse_l_reg(opcode)) as u16,  // ADD Addr_R, Rx
 					0x29 => println!("opcode.0x{:04X}", opcode),
 					0x33 => println!("opcode.0x{:04X}", opcode),
-					0x55 => println!("opcode.0x{:04X}", opcode),
-					0x65 => println!("opcode.0x{:04X}", opcode),
+					0x55 => {                                                           // LD [I], [R]
+                        for (i, register) in self.registers.iter().enumerate() {
+                            self.ram[self.addr_reg as usize + i] = *register;
+                        }
+                    },
+					0x65 => {                                                           // LD [R], [I]
+                        let mut i: usize = 0;
+                        for byte in &self.ram[self.addr_reg as usize..self.addr_reg as usize + 15] {
+                            self.registers[i] = *byte;
+                            i += 1;
+                        }
+                    },
 					_ => { println!("Invalid opcode.0x{:04X}", opcode); return; },
 
 				}
                 _ => { println!("Invalid opcode.0x{:04X}", opcode); return; },
             }
             self.print_state();
-            self.pc += 1;
+            self.pc += FETCH_STEP;
             println!("opcode: 0x{:04X}", opcode);
         }
     }
@@ -261,7 +271,12 @@ impl Chip8 {
         for i in 8..16 {
             print!("V{:X}: 0x{:02X}   ", i, self.registers[i]);
         }
-        
+        println!("------------------------------");
+        println!("Addr Register Data:");
+        for i in 0..15 {
+            print!("0x{:02X}   ", self.ram[self.addr_reg as usize + i as usize]);
+        }
+
         println!("\n==============================\n");
     }
 

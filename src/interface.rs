@@ -1,8 +1,10 @@
 
-use std::{io, ops::{BitOr, Shl}};
+use std::{io, ops::{BitAnd, BitOr, Shl, Shr}};
 use macroquad::prelude::*;
 use rfd::FileDialog;
 use macroquad::ui::{hash, root_ui, Skin};
+use crate::chip8::{Chip8, DISPLAY_BUFFER_START, SCREEN_HEIGHT, SCREEN_SIZE, SCREEN_WIDTH};
+
 use super::chip8;
 
 pub fn gen_empty_rectangle(
@@ -99,36 +101,69 @@ fn error_popup(error: &str) {
 
 pub async fn main_loop(mut chip: chip8::Chip8) {
     let window_size = vec2(screen_width(), screen_height());
+    let mut state = false;
     
     loop {
-        clear_background(GRAY);
-        root_ui().window(
-            hash!(),
-            vec2(0.0, 0.0),
-            window_size,
-            |ui| {
-                ui.label(vec2(screen_width() * 0.5, 10.0), "Main Menu");
-                if ui.button(vec2(screen_width() * 0.5, 275.0), "launch ROM") {
-                    // TODO
-                    let file = open_rom_dialog();
-                    if let Some(rom) = file {
-                        chip.load_rom(rom);
-                        chip.print_ram();
-                    } else {
-                        error_popup("loading ROM file");
-                        return; // returns from closure, act as a continue here
+        if state == false {
+            clear_background(GRAY);
+            root_ui().window(
+                hash!(),
+                vec2(0.0, 0.0),
+                window_size,
+                |ui| {
+                    ui.label(vec2(screen_width() * 0.5, 10.0), "Main Menu");
+                    if ui.button(vec2(screen_width() * 0.5, 275.0), "launch ROM") {
+                        // TODO
+                        let file = open_rom_dialog();
+                        if let Some(rom) = file {
+                            chip.load_rom(rom);
+                            chip.print_ram();
+                        } else {
+                            error_popup("loading ROM file");
+                            return; // returns from closure, act as a continue here
+                        }
+                        state = true;
+                        clear_background(BLACK);
+                        chip.interpret();
                     }
-                    // chip.print_ram();
-                    chip.interpret();
-                }
-                if ui.button(vec2(screen_width() * 0.5, 350.0), "Quit") {
-                    std::process::exit(0);
-                }
-                if ui.button(vec2(5.0, screen_height() - 50.0), "settings") {
-                    // TODO
-                }
-            },
-        );
+                    if ui.button(vec2(screen_width() * 0.5, 350.0), "Quit") {
+                        std::process::exit(0);
+                    }
+                    if ui.button(vec2(5.0, screen_height() - 50.0), "settings") {
+                        // TODO
+                    }
+                },
+            );
+
+        } else {
+           emu_render_loop(&chip).await;
+        }
         next_frame().await;
     }
+}
+
+async fn emu_render_loop(chip: &Chip8) {
+    use macroquad::prelude::*;
+
+	let mut screen = Image::gen_image_color(SCREEN_WIDTH as u16, SCREEN_HEIGHT as u16, BLANK);
+    let (mut x, mut y) = (0, 0);
+	
+    for byte in &chip.get_vram()[DISPLAY_BUFFER_START..DISPLAY_BUFFER_START + (SCREEN_SIZE / 8) as usize] {
+		for bit in 7..0 {
+			if byte.shr(bit as u8).bitand(1) == 1 {
+				screen.set_pixel(x, y, BLACK);
+            } else {
+				screen.set_pixel(x, y, WHITE);
+            }
+            x += 1;
+            if x >= SCREEN_WIDTH as u32 {
+				x = 0;
+                y += 1;
+            }
+        }
+		let texture = Texture2D::from_image(&screen);
+		draw_texture(&texture, 0.0, 0.0, WHITE);
+		// let render_target = render_target(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32);
+    }
+
 }
