@@ -1,5 +1,9 @@
-use std::ops::{BitAnd, BitAndAssign, BitOr, BitXor, Shl, ShlAssign, Shr, ShrAssign};
-use macroquad::{color::BLACK, window::clear_background, *};
+use core::time;
+use std::{ops::{BitAnd, BitAndAssign, BitOr, BitXor, Shl, ShlAssign, Shr, ShrAssign}, sync::Mutex};
+use macroquad::{color::WHITE, prelude::Image};
+
+use macroquad::prelude::{Color, BLACK};
+
 
 const FONT_SET_LEN: usize = 80;
 const FONT_SET: [u8;FONT_SET_LEN] = [
@@ -25,6 +29,10 @@ pub const SCREEN_WIDTH: u8 = 64;
 pub const SCREEN_HEIGHT: u8 = 32;
 pub const SCREEN_SIZE: u16 = SCREEN_HEIGHT as u16 * SCREEN_WIDTH as u16;
 
+pub const TARGET_SCREEN_WIDTH: u16 = 1024;
+pub const TARGET_SCREEN_HEIGH: u16 = 512;
+pub const SCALE_FACTOR: u16 = 16;
+
 const START_USABLE_RAM: usize = 0x200;
 const END_USABLE_RAM: usize = 0xEA0;
 const ALL_RAM: usize = 4096;
@@ -39,7 +47,12 @@ const LOW_BYTE_MASK: u16 = 0x00FF;
 // const HIGH_BYTE_MASK: u16 = 0xFF00;
 const N_MASK: u16 = 0x000F;
 
+use std::sync::Arc;
 
+struct Point {
+    x: u32,
+    y: u32,
+}
 pub struct Chip8 {
     registers: [u8; 16],
     addr_reg: u16,
@@ -51,11 +64,11 @@ pub struct Chip8 {
     ram: [u8; ALL_RAM],
     key_inputs: [bool; 16],
     display: (u8, u8),
-    
+    virt_display: Arc<Mutex<Image>>,
 }
 
 impl Chip8 {
-    pub fn new() -> Self {
+    pub fn new(virt_display_buffer: Arc<Mutex<Image>>) -> Self {
         Self {
             registers: [0; 16],
             addr_reg: 0,
@@ -67,16 +80,24 @@ impl Chip8 {
             ram: [0; ALL_RAM],
             key_inputs: [false; 16],
             display: (SCREEN_WIDTH, SCREEN_HEIGHT),
+            virt_display: virt_display_buffer,
         }
     }
 
-    pub fn load_fonts(&mut self) {
+
+    pub fn init(&mut self, rom: Vec<u8>) {
+        self.load_fonts();
+
+        self.load_rom(rom);
+    }
+
+    fn load_fonts(&mut self) {
         let font_start_addr = FONT_START_ADDR;
 
         self.ram[font_start_addr..font_start_addr + FONT_SET_LEN].copy_from_slice(&FONT_SET);
     }
 
-    pub fn load_rom(&mut self, rom: Vec<u8>) {
+    fn load_rom(&mut self, rom: Vec<u8>) {
         let len_bin = rom.len();
         if len_bin > AVAIBLE_RAM {
             panic!("File too large...");
@@ -85,40 +106,71 @@ impl Chip8 {
         self.ram[self.pc as usize..self.pc as usize + len_bin ].clone_from_slice(&rom);
     }
 
-    pub fn get_vram(&self) -> & [u8; ALL_RAM] {
+    fn get_vram(&self) -> & [u8; ALL_RAM] {
         &self.ram
     }
-
+    
     fn get_reg(&self, x: u8) -> u8{
-
+        
         self.registers[x as usize]
     }
-
+    
     
     fn get_mut_reg(&mut self, x: u8) -> &mut u8 {
         &mut self.registers[x as usize]
     }
+    
+    #[inline]
+    fn set_pixel(img: &mut Image, pos: Point, color: Color) {
+        for i in 0..SCALE_FACTOR as u32 {
+            for j in 0..SCALE_FACTOR as u32 {
+                img.set_pixel(pos.x + j, pos.y + i, color);
+            }
+        }
+    }
 
+    #[inline]
+    fn transpose_line_to_vdisplay(img: &mut [[u8; 4]], line_byte: u8, mut reminder: i16, pos: Point) {
+        use macroquad::prelude::{Color, BLACK};
+        let mut color: Color; 
+
+        if reminder < 0 {
+            reminder = 7
+        }
+        
+        for i in reminder..0 {
+            if line_byte.shr(i).bitand(1) == 1 {
+                color = WHITE;
+            } else {
+                color = BLACK;
+            }
+
+        }
+
+    }
+    
     pub fn interpret(&mut self) {
+        let pause_time = time::Duration::from_millis(16);
+        
         loop {
             if self.pc > ALL_RAM as u16 - 1 {
                 panic!("invalid prog counter");
             }
+            println!("pc: {0}", self.pc);
             let opcode: u16 = (self.ram[self.pc as usize] as u16).shl(8) | self.ram[self.pc as usize + 1] as u16;
-            match opcode >> 12 {
+            println!("opcode: 0x{:04X}", opcode);
+			match opcode >> 12 {
                 0 => {
                     match opcode.bitand(LOW_BYTE_MASK) {
-                        0xE0 => { clear_background(BLACK);              // CLS
-                            self.ram[DISPLAY_BUFFER_START..].fill(0); 
-                        }
+                        0xE0 => self.ram[DISPLAY_BUFFER_START..].fill(0),               // CLS
 
-                        0xEE => { self.pc = self.stack[self.stack_ptr as usize] - FETCH_STEP; self.stack_ptr -= 1; },        // RETURN
+                        0xEE => { self.pc = self.stack[self.stack_ptr as usize]; self.stack_ptr -= 1; continue; },        // RETURN
                         
                         _ => { println!("Invalid opcode.0x{:04X}", opcode); return; },
                     }
                 } 
-                0x1 => { self.pc = opcode.bitand(ADDR_MASK) - FETCH_STEP},     // JP addr
-                0x2 => { self.stack_ptr += 1; self.stack[self.stack_ptr as usize] = self.pc; self.pc = opcode.bitand(ADDR_MASK) - FETCH_STEP; },        // CALL addr
+                0x1 => { self.pc = opcode.bitand(ADDR_MASK); continue; },     // JP addr
+                0x2 => { self.stack_ptr += 1; self.stack[self.stack_ptr as usize] = self.pc; self.pc = opcode.bitand(ADDR_MASK); continue; },        // CALL addr
                 0x3 => { if self.get_reg(parse_l_reg(opcode)) == opcode as u8 { self.pc += FETCH_STEP; } },        // SE Rx, byte
                 0x4 => { if self.get_reg(parse_l_reg(opcode)) != opcode as u8 { self.pc += FETCH_STEP; } },        // SNE Rx, byte
                 0x5 => { if self.get_reg(parse_l_reg(opcode)) == self.get_reg(parse_l_reg(opcode)) { self.pc += FETCH_STEP; } }, // SE Rx, Ry
@@ -170,22 +222,23 @@ impl Chip8 {
 						}
 						(*self.get_mut_reg(parse_l_reg(opcode))).shl_assign(1);
                     },
-					_ => { println!("Invalid opcode.0x{:04X}", opcode); return; },
+					_ => { println!("Invalid opcode.0x{:04X}", opcode); continue; },
                     
                     }
                 }
                 0x9 => { if self.get_reg(parse_l_reg(opcode)) != self.get_reg(parse_l_reg(opcode)) { self.pc += FETCH_STEP; } },		// SNE Rx, Ry
                 0xA => self.addr_reg = opcode.bitand(ADDR_MASK),															// LD Addr_R, addr (12bits)
-                0xB => self.pc = self.get_reg(0) as u16 + opcode.bitand(ADDR_MASK) - FETCH_STEP,									// JMP R0, addr (12bits)
+                0xB => { self.pc = self.get_reg(0) as u16 + opcode.bitand(ADDR_MASK); continue; },									// JMP R0, addr (12bits)
                 0xC => *self.get_mut_reg(parse_l_reg(opcode)) &= macroquad::rand::gen_range(0, 255),						// RND Rx, byte		
                 
                 0xD => {																								// DRW Rx, Ry, nibble
 					let sprite_len = opcode.bitand(N_MASK) as usize;
 					let sprite: Vec<u8> =  self.ram[self.addr_reg as usize..(self.addr_reg as usize + sprite_len)].into();
 					let (x, y) = (self.get_reg(parse_l_reg(opcode)), self.get_reg(parse_r_reg(opcode)));
-
+					
+					self.registers[0xF] = 0;
 					let reminder: i16 = x as i16 + SPRITE_WIDTH as i16 - SCREEN_WIDTH as i16;
-
+					
 					for line in sprite {
 						if y >= SCREEN_HEIGHT {
 							break;
@@ -198,13 +251,10 @@ impl Chip8 {
 						} else {
 							self.ram[DISPLAY_BUFFER_START + pos as usize] ^= line;
 						}
-                        if original_val & !self.ram[DISPLAY_BUFFER_START + pos as usize] != 0 {     // check if bits have been flipped from 1 to 0
-                            *self.get_mut_reg(0xF) = 1;
-                        } else {
-                            *self.get_mut_reg(0xF) = 0;
-                        }
+						if original_val & !self.ram[DISPLAY_BUFFER_START + pos as usize] != 0 {     // check if bits have been flipped from 1 to 0
+							self.registers[0xF] = 1;
+						}
 					}
-                    
 				},
                 0xE => match opcode as u8 {
 					0x9E => println!("opcode.0x{:04X}", opcode),
@@ -237,8 +287,9 @@ impl Chip8 {
                 _ => { println!("Invalid opcode.0x{:04X}", opcode); return; },
             }
             self.print_state();
+			// println!("la");
             self.pc += FETCH_STEP;
-            println!("opcode: 0x{:04X}", opcode);
+            std::thread::sleep(pause_time);
         }
     }
 

@@ -1,11 +1,40 @@
-
-use std::{io, ops::{BitAnd, BitOr, Shl, Shr}};
+use core::time;
+use std::{sync::{Arc, Mutex}};
 use macroquad::prelude::*;
-use rfd::FileDialog;
 use macroquad::ui::{hash, root_ui, Skin};
-use crate::chip8::{Chip8, DISPLAY_BUFFER_START, SCREEN_HEIGHT, SCREEN_SIZE, SCREEN_WIDTH};
+use crate::chip8::{Chip8, TARGET_SCREEN_HEIGH, TARGET_SCREEN_WIDTH};
 
-use super::chip8;
+
+struct Renderer<'a> {
+	image: &'a Arc<Mutex<Image>>,
+}
+
+impl <'a>Renderer<'a> {
+	pub fn new(shared_bufffer: &'a Arc<Mutex<Image>>) -> Self {
+		Self {
+			image: shared_bufffer,
+		}
+	}
+
+
+	async fn chip8_emu_loop(&self) {
+        use macroquad::prelude::*;
+        let sixteen_millis = time::Duration::from_millis(16);
+		clear_background(BLACK);
+
+		loop {
+            {
+                let shared_buffer = self.image.lock().unwrap();
+                let texture = Texture2D::from_image(&shared_buffer);
+    
+                draw_texture(&texture, 0.0, 0.0, WHITE);
+            }
+            std::thread::sleep(sixteen_millis);
+            next_frame().await;
+		}
+
+	}
+}
 
 pub fn gen_empty_rectangle(
     width: u16,
@@ -31,6 +60,7 @@ pub fn gen_empty_rectangle(
 }
 
 pub fn open_rom_dialog() -> Option<Vec<u8>> {
+	use rfd::FileDialog;
 
     let file = FileDialog::new()
         .add_filter("Chip8 ROM", &["ch8", "rom", "bin"])
@@ -46,11 +76,11 @@ pub fn open_rom_dialog() -> Option<Vec<u8>> {
 pub fn create_textures() -> (Image, Image, Image){
     let window_background = Image::gen_image_color(screen_width() as u16, screen_height() as u16, DARKGRAY);
     
-    let empty_rec = gen_empty_rectangle(120, 60, 3, PURPLE);
+    let empty_rec = gen_empty_rectangle(120, 60, 3, DARKPURPLE);
     let mut button_background = Image::gen_image_color(120, 60, DARKBLUE);
     button_background.overlay(&empty_rec);
     
-    let empty_rec_clicked = gen_empty_rectangle(118, 58, 3, PURPLE);
+    let empty_rec_clicked = gen_empty_rectangle(118, 58, 3, DARKPURPLE);
     let mut button_clicked_background = Image::gen_image_color(118, 58, BLUE);
     button_clicked_background.overlay(&empty_rec_clicked);
 
@@ -99,71 +129,64 @@ fn error_popup(error: &str) {
     println!("error: {error}.");
 }
 
-pub async fn main_loop(mut chip: chip8::Chip8) {
-    let window_size = vec2(screen_width(), screen_height());
-    let mut state = false;
-    
-    loop {
-        if state == false {
-            clear_background(GRAY);
-            root_ui().window(
-                hash!(),
-                vec2(0.0, 0.0),
-                window_size,
-                |ui| {
-                    ui.label(vec2(screen_width() * 0.5, 10.0), "Main Menu");
-                    if ui.button(vec2(screen_width() * 0.5, 275.0), "launch ROM") {
-                        // TODO
-                        let file = open_rom_dialog();
-                        if let Some(rom) = file {
-                            chip.load_rom(rom);
-                            chip.print_ram();
-                        } else {
-                            error_popup("loading ROM file");
-                            return; // returns from closure, act as a continue here
-                        }
-                        state = true;
-                        clear_background(BLACK);
-                        chip.interpret();
-                    }
-                    if ui.button(vec2(screen_width() * 0.5, 350.0), "Quit") {
-                        std::process::exit(0);
-                    }
-                    if ui.button(vec2(5.0, screen_height() - 50.0), "settings") {
-                        // TODO
-                    }
-                },
-            );
-
+fn launch_emu(shared_buffer: Arc<Mutex<Image>>) {
+    let mut chip = Chip8::new(shared_buffer);
+        
+    let emu_thread_handle = std::thread::spawn(move || {
+		
+		let file = open_rom_dialog();
+        if let Some(rom) = file {
+			chip.init(rom);
+			chip.print_ram();
+            chip.interpret();
+            
         } else {
-           emu_render_loop(&chip).await;
+			error_popup("loading ROM file");
+            return; // returns from closure, act as a continue here
         }
-        next_frame().await;
+
+    });
+
+    match emu_thread_handle.join() {
+        Ok(_) => println!("emu sucess"),
+        Err(_) => println!("emu panicked"),
     }
+    
 }
 
-async fn emu_render_loop(chip: &Chip8) {
-    use macroquad::prelude::*;
+pub async fn main_loop() {
+	let window_size = vec2(screen_width(), screen_height());
+	let render_buffer = Arc::new(Mutex::new(Image::gen_image_color(TARGET_SCREEN_WIDTH as u16, TARGET_SCREEN_HEIGH as u16, BLANK)));
+    let renderer = Renderer::new(&render_buffer);
+	let emu_buffer = Arc::clone(&render_buffer);
+    let mut state = false;
 
-	let mut screen = Image::gen_image_color(SCREEN_WIDTH as u16, SCREEN_HEIGHT as u16, BLANK);
-    let (mut x, mut y) = (0, 0);
-	
-    for byte in &chip.get_vram()[DISPLAY_BUFFER_START..DISPLAY_BUFFER_START + (SCREEN_SIZE / 8) as usize] {
-		for bit in 7..0 {
-			if byte.shr(bit as u8).bitand(1) == 1 {
-				screen.set_pixel(x, y, BLACK);
-            } else {
-				screen.set_pixel(x, y, WHITE);
-            }
-            x += 1;
-            if x >= SCREEN_WIDTH as u32 {
-				x = 0;
-                y += 1;
-            }
-        }
-		let texture = Texture2D::from_image(&screen);
-		draw_texture(&texture, 0.0, 0.0, WHITE);
-		// let render_target = render_target(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32);
-    }
+	if state == false {
+		loop {
+			clear_background(GRAY);
+			root_ui().window(
+				hash!(),
+				vec2(0.0, 0.0),
+				window_size,
+				|ui| {
+					ui.label(vec2(screen_width() * 0.5, 10.0), "Main Menu");
+					if ui.button(vec2(screen_width() * 0.5, 275.0), "launch ROM") {
+						// TODO
+						launch_emu(Arc::clone(&emu_buffer));
+					}
+					if ui.button(vec2(screen_width() * 0.5, 350.0), "Quit") {
+						std::process::exit(0);
+					}
+					if ui.button(vec2(5.0, screen_height() - 50.0), "settings") {
+						// TODO
+					}
+				},
+			);
+			draw_rectangle_lines(005., 05., 100., 50.0, 10.0, RED);
+			next_frame().await;
+		}
 
+	} else {
+		renderer.chip8_emu_loop().await;
+	}
 }
