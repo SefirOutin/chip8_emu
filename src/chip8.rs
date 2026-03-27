@@ -1,6 +1,6 @@
 use core::time;
 use std::{ops::{BitAnd, BitAndAssign, BitOr, BitXor, Shl, ShlAssign, Shr, ShrAssign}, sync::Mutex};
-use macroquad::{color::WHITE, prelude::Image};
+use macroquad::{color::WHITE, miniquad::native::linux_x11::libx11::Display, prelude::Image};
 
 use macroquad::prelude::{Color, BLACK};
 
@@ -33,11 +33,14 @@ pub const TARGET_SCREEN_WIDTH: u16 = 1024;
 pub const TARGET_SCREEN_HEIGH: u16 = 512;
 pub const SCALE_FACTOR: u16 = 16;
 
+// const CLEAR_SCREEN_SLICE: [Color; TARGET_SCREEN_WIDTH as usize * TARGET_SCREEN_HEIGH as usize] = [WHITE; TARGET_SCREEN_WIDTH as usize * TARGET_SCREEN_HEIGH as usize];
+
 const START_USABLE_RAM: usize = 0x200;
 const END_USABLE_RAM: usize = 0xEA0;
 const ALL_RAM: usize = 4096;
 const AVAIBLE_RAM: usize = END_USABLE_RAM - START_USABLE_RAM;
 pub const DISPLAY_BUFFER_START: usize = 0xF00;
+const DISPLAY_BUFFER_SIZE: usize = (SCREEN_WIDTH as usize / 8) * (SCREEN_HEIGHT as usize / 8);
 const FONT_START_ADDR: usize = 0x50;
 const SPRITE_WIDTH: u8 = 8;
 const FETCH_STEP: u16 = 2;
@@ -72,7 +75,7 @@ impl Chip8 {
         Self {
             registers: [0; 16],
             addr_reg: 0,
-            pc: START_USABLE_RAM as u16 - 1,
+            pc: START_USABLE_RAM as u16,
             stack: [0; 16],
             stack_ptr: 0,
             d_timer: 0,
@@ -105,10 +108,6 @@ impl Chip8 {
 
         self.ram[self.pc as usize..self.pc as usize + len_bin ].clone_from_slice(&rom);
     }
-
-    fn get_vram(&self) -> & [u8; ALL_RAM] {
-        &self.ram
-    }
     
     fn get_reg(&self, x: u8) -> u8{
         
@@ -120,37 +119,42 @@ impl Chip8 {
         &mut self.registers[x as usize]
     }
     
-    #[inline]
-    fn set_pixel(img: &mut Image, pos: Point, color: Color) {
+    // #[inline]
+    fn draw_square(&self, img: &mut Image, pos: Point, color: Color) {
         for i in 0..SCALE_FACTOR as u32 {
             for j in 0..SCALE_FACTOR as u32 {
+                println!("setting pixel: x: {0} y: {1}", pos.x + j, pos.y + i);
                 img.set_pixel(pos.x + j, pos.y + i, color);
             }
         }
+
     }
 
-    #[inline]
-    fn transpose_line_to_vdisplay(img: &mut [[u8; 4]], line_byte: u8, mut reminder: i16, pos: Point) {
+    fn transpose_virt_line_to_display(&self, line_byte: u8, mut reminder: i16, pos: &Point) {
         use macroquad::prelude::{Color, BLACK};
-        let mut color: Color; 
-
+        
         if reminder < 0 {
             reminder = 7
         }
+        let mut img = self.virt_display.lock().unwrap();
         
-        for i in reminder..0 {
+        for i in (0..reminder).rev() {
+            let display_pos = Point { x: (pos.x * SCALE_FACTOR as u32) + i as u32, y: pos.y * SCALE_FACTOR as u32 };
+            println!("scaled pos: x: {0} y: {1}", display_pos.x, display_pos.y);
+            let color: Color;
             if line_byte.shr(i).bitand(1) == 1 {
-                color = WHITE;
-            } else {
                 color = BLACK;
+            } else {
+                color = WHITE;
             }
-
+            // println!("drawing square|||||||||||||||||||||||||||");
+            self.draw_square(&mut img, display_pos, color);
         }
-
+        
     }
     
     pub fn interpret(&mut self) {
-        let pause_time = time::Duration::from_millis(16);
+        let pause_time = time::Duration::from_millis(5);
         
         loop {
             if self.pc > ALL_RAM as u16 - 1 {
@@ -158,19 +162,24 @@ impl Chip8 {
             }
             println!("pc: {0}", self.pc);
             let opcode: u16 = (self.ram[self.pc as usize] as u16).shl(8) | self.ram[self.pc as usize + 1] as u16;
+            self.pc += FETCH_STEP;
             println!("opcode: 0x{:04X}", opcode);
 			match opcode >> 12 {
                 0 => {
                     match opcode.bitand(LOW_BYTE_MASK) {
-                        0xE0 => self.ram[DISPLAY_BUFFER_START..].fill(0),               // CLS
+                        0xE0 => {   self.ram[DISPLAY_BUFFER_START..].fill(0);               // CLS
+                                    let mut img = self.virt_display.lock().unwrap();
 
-                        0xEE => { self.pc = self.stack[self.stack_ptr as usize]; self.stack_ptr -= 1; continue; },        // RETURN
+                                    img.update(&[BLACK; TARGET_SCREEN_WIDTH as usize * TARGET_SCREEN_HEIGH as usize]);
+                                },
+
+                        0xEE => { self.pc = self.stack[self.stack_ptr as usize]; self.stack_ptr -= 1 },        // RETURN
                         
                         _ => { println!("Invalid opcode.0x{:04X}", opcode); return; },
                     }
                 } 
-                0x1 => { self.pc = opcode.bitand(ADDR_MASK); continue; },     // JP addr
-                0x2 => { self.stack_ptr += 1; self.stack[self.stack_ptr as usize] = self.pc; self.pc = opcode.bitand(ADDR_MASK); continue; },        // CALL addr
+                0x1 => { self.pc = opcode.bitand(ADDR_MASK) },     // JP addr
+                0x2 => { self.stack_ptr += 1; self.stack[self.stack_ptr as usize] = self.pc; self.pc = opcode.bitand(ADDR_MASK)},        // CALL addr
                 0x3 => { if self.get_reg(parse_l_reg(opcode)) == opcode as u8 { self.pc += FETCH_STEP; } },        // SE Rx, byte
                 0x4 => { if self.get_reg(parse_l_reg(opcode)) != opcode as u8 { self.pc += FETCH_STEP; } },        // SNE Rx, byte
                 0x5 => { if self.get_reg(parse_l_reg(opcode)) == self.get_reg(parse_l_reg(opcode)) { self.pc += FETCH_STEP; } }, // SE Rx, Ry
@@ -222,38 +231,43 @@ impl Chip8 {
 						}
 						(*self.get_mut_reg(parse_l_reg(opcode))).shl_assign(1);
                     },
-					_ => { println!("Invalid opcode.0x{:04X}", opcode); continue; },
+					_ => { println!("Invalid opcode.0x{:04X}", opcode); },
                     
                     }
                 }
                 0x9 => { if self.get_reg(parse_l_reg(opcode)) != self.get_reg(parse_l_reg(opcode)) { self.pc += FETCH_STEP; } },		// SNE Rx, Ry
                 0xA => self.addr_reg = opcode.bitand(ADDR_MASK),															// LD Addr_R, addr (12bits)
-                0xB => { self.pc = self.get_reg(0) as u16 + opcode.bitand(ADDR_MASK); continue; },									// JMP R0, addr (12bits)
+                0xB => self.pc = self.get_reg(0) as u16 + opcode.bitand(ADDR_MASK),									// JMP R0, addr (12bits)
                 0xC => *self.get_mut_reg(parse_l_reg(opcode)) &= macroquad::rand::gen_range(0, 255),						// RND Rx, byte		
                 
                 0xD => {																								// DRW Rx, Ry, nibble
 					let sprite_len = opcode.bitand(N_MASK) as usize;
-					let sprite: Vec<u8> =  self.ram[self.addr_reg as usize..(self.addr_reg as usize + sprite_len)].into();
-					let (x, y) = (self.get_reg(parse_l_reg(opcode)), self.get_reg(parse_r_reg(opcode)));
+					let sprite: Vec<u8> = self.ram[self.addr_reg as usize..(self.addr_reg as usize + sprite_len)].into();
+					let mut pos = Point { x: self.get_reg(parse_l_reg(opcode)) as u32, y: self.get_reg(parse_r_reg(opcode)) as u32 };
 					
-					self.registers[0xF] = 0;
-					let reminder: i16 = x as i16 + SPRITE_WIDTH as i16 - SCREEN_WIDTH as i16;
-					
+					let reminder: i16 = pos.x as i16 + SPRITE_WIDTH as i16 - SCREEN_WIDTH as i16;
+					pos.x = pos.x % (self.display.0 as u32 - 1);
+					pos.y = pos.y % (self.display.1 as u32 - 1);
+                    
+                    self.registers[0xF] = 0;
 					for line in sprite {
-						if y >= SCREEN_HEIGHT {
+						if pos.y >= SCREEN_HEIGHT as u32 {
 							break;
 						}
 						
-						let pos = x * y;
-						let original_val = self.ram[DISPLAY_BUFFER_START + pos as usize];
+						let ram_pos = DISPLAY_BUFFER_START as u32 + (pos.x / 8) * (pos.y / 8);
+                        println!("pos put line chip: {0} {1} | addr: {2}", pos.x, pos.y, ram_pos);
+						let original_val = self.ram[ram_pos as usize];
 						if reminder > 0 {
-							*(&mut self.ram[DISPLAY_BUFFER_START + pos as usize]) ^= line.shr(reminder);
+							*(&mut self.ram[ram_pos as usize]) ^= line.shr(reminder);
 						} else {
-							self.ram[DISPLAY_BUFFER_START + pos as usize] ^= line;
+							self.ram[ram_pos as usize] ^= line;
 						}
-						if original_val & !self.ram[DISPLAY_BUFFER_START + pos as usize] != 0 {     // check if bits have been flipped from 1 to 0
+						if original_val & !self.ram[ram_pos as usize] != 0 {     // check if bits have been flipped from 1 to 0
 							self.registers[0xF] = 1;
 						}
+                        self.transpose_virt_line_to_display(line, reminder, &pos);
+                        pos.y += 1;
 					}
 				},
                 0xE => match opcode as u8 {
@@ -286,10 +300,9 @@ impl Chip8 {
 				}
                 _ => { println!("Invalid opcode.0x{:04X}", opcode); return; },
             }
-            self.print_state();
+            // self.print_state();
 			// println!("la");
-            self.pc += FETCH_STEP;
-            std::thread::sleep(pause_time);
+            // std::thread::sleep(pause_time);
         }
     }
 

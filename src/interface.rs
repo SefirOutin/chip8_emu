@@ -4,6 +4,9 @@ use macroquad::prelude::*;
 use macroquad::ui::{hash, root_ui, Skin};
 use crate::chip8::{Chip8, TARGET_SCREEN_HEIGH, TARGET_SCREEN_WIDTH};
 
+const TARGET_FPS: u64 = 60;
+const FREQUENCY_MS: u64 = 1000 / TARGET_FPS;
+
 
 struct Renderer<'a> {
 	image: &'a Arc<Mutex<Image>>,
@@ -19,9 +22,8 @@ impl <'a>Renderer<'a> {
 
 	async fn chip8_emu_loop(&self) {
         use macroquad::prelude::*;
-        let sixteen_millis = time::Duration::from_millis(16);
-		clear_background(BLACK);
-
+        let sixteen_millis = time::Duration::from_millis(FREQUENCY_MS);
+		clear_background(WHITE);
 		loop {
             {
                 let shared_buffer = self.image.lock().unwrap();
@@ -129,7 +131,7 @@ fn error_popup(error: &str) {
     println!("error: {error}.");
 }
 
-fn launch_emu(shared_buffer: Arc<Mutex<Image>>) {
+fn launch_emu(shared_buffer: Arc<Mutex<Image>>) -> std::thread::JoinHandle<()> {
     let mut chip = Chip8::new(shared_buffer);
         
     let emu_thread_handle = std::thread::spawn(move || {
@@ -137,7 +139,7 @@ fn launch_emu(shared_buffer: Arc<Mutex<Image>>) {
 		let file = open_rom_dialog();
         if let Some(rom) = file {
 			chip.init(rom);
-			chip.print_ram();
+			// chip.print_ram();
             chip.interpret();
             
         } else {
@@ -147,46 +149,46 @@ fn launch_emu(shared_buffer: Arc<Mutex<Image>>) {
 
     });
 
-    match emu_thread_handle.join() {
-        Ok(_) => println!("emu sucess"),
-        Err(_) => println!("emu panicked"),
-    }
-    
+    emu_thread_handle   
 }
 
 pub async fn main_loop() {
 	let window_size = vec2(screen_width(), screen_height());
-	let render_buffer = Arc::new(Mutex::new(Image::gen_image_color(TARGET_SCREEN_WIDTH as u16, TARGET_SCREEN_HEIGH as u16, BLANK)));
+	let render_buffer = Arc::new(Mutex::new(Image::gen_image_color(TARGET_SCREEN_WIDTH as u16, TARGET_SCREEN_HEIGH as u16, WHITE)));
     let renderer = Renderer::new(&render_buffer);
 	let emu_buffer = Arc::clone(&render_buffer);
     let mut state = false;
+    let mut thread_handler: Option<std::thread::JoinHandle<()>> = None;
 
-	if state == false {
-		loop {
-			clear_background(GRAY);
-			root_ui().window(
-				hash!(),
-				vec2(0.0, 0.0),
-				window_size,
-				|ui| {
-					ui.label(vec2(screen_width() * 0.5, 10.0), "Main Menu");
-					if ui.button(vec2(screen_width() * 0.5, 275.0), "launch ROM") {
-						// TODO
-						launch_emu(Arc::clone(&emu_buffer));
-					}
-					if ui.button(vec2(screen_width() * 0.5, 350.0), "Quit") {
-						std::process::exit(0);
-					}
-					if ui.button(vec2(5.0, screen_height() - 50.0), "settings") {
-						// TODO
-					}
-				},
-			);
-			draw_rectangle_lines(005., 05., 100., 50.0, 10.0, RED);
-			next_frame().await;
-		}
-
-	} else {
-		renderer.chip8_emu_loop().await;
+	
+	while state == false {
+		clear_background(GRAY);
+		root_ui().window(
+			hash!(),
+			vec2(0.0, 0.0),
+			window_size,
+			|ui| {
+				ui.label(vec2(screen_width() * 0.5, 10.0), "Main Menu");
+				if ui.button(vec2(screen_width() * 0.5, 275.0), "launch ROM") {
+					// TODO
+                    state = true;
+					thread_handler = Some(launch_emu(Arc::clone(&emu_buffer)));
+				}
+				if ui.button(vec2(screen_width() * 0.5, 350.0), "Quit") {
+					std::process::exit(0);
+				}
+				if ui.button(vec2(5.0, screen_height() - 50.0), "settings") {
+					// TODO
+				}
+			},
+		);
+		draw_rectangle_lines(005., 05., 100., 50.0, 10.0, RED);
+		next_frame().await;
 	}
+
+	renderer.chip8_emu_loop().await;
+    
+    if thread_handler.is_some() {
+        thread_handler.unwrap().join().unwrap();
+    }
 }
