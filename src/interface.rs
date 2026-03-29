@@ -157,7 +157,7 @@ pub async fn main_loop() {
 	let render_buffer = Arc::new(Mutex::new(Image::gen_image_color(TARGET_SCREEN_WIDTH as u16, TARGET_SCREEN_HEIGH as u16, WHITE)));
     let renderer = Renderer::new(&render_buffer);
 	let emu_buffer = Arc::clone(&render_buffer);
-    let mut state = false;
+    let mut state = true;
     let mut thread_handler: Option<std::thread::JoinHandle<()>> = None;
 
 	
@@ -185,7 +185,7 @@ pub async fn main_loop() {
 		draw_rectangle_lines(005., 05., 100., 50.0, 10.0, RED);
 		next_frame().await;
 	}
-
+    thread_handler = Some(launch_emu(Arc::clone(&emu_buffer)));
 	renderer.chip8_emu_loop().await;
     
     if thread_handler.is_some() {

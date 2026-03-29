@@ -121,38 +121,51 @@ impl Chip8 {
     
     // #[inline]
     fn draw_square(&self, img: &mut Image, pos: Point, color: Color) {
+        println!("setting pixel: x: {0} y: {1} TO x:{2} y:{3}", pos.x, pos.y, pos.x + SCALE_FACTOR as u32, pos.y + SCALE_FACTOR as u32);
         for i in 0..SCALE_FACTOR as u32 {
             for j in 0..SCALE_FACTOR as u32 {
-                println!("setting pixel: x: {0} y: {1}", pos.x + j, pos.y + i);
                 img.set_pixel(pos.x + j, pos.y + i, color);
             }
         }
 
     }
 
-    fn transpose_virt_line_to_display(&self, line_byte: u8, mut reminder: i16, pos: &Point) {
-        use macroquad::prelude::{Color, BLACK};
-        
-        if reminder < 0 {
-            reminder = 7
-        }
+    fn project_virt_line_to_display(&self, line_byte: u8, reminder: i16, pos: &Point) {
+        use macroquad::prelude::{Color, BLACK, RED, GREEN};
+        let mut j: i16 = 0;
+        let rm = if reminder < 0 {
+            7
+        } else {
+            reminder
+        };
+
         let mut img = self.virt_display.lock().unwrap();
         
-        for i in (0..reminder).rev() {
-            let display_pos = Point { x: (pos.x * SCALE_FACTOR as u32) + i as u32, y: pos.y * SCALE_FACTOR as u32 };
+        for i in (0..rm).rev() {
+            let display_pos = Point { x: (pos.x * SCALE_FACTOR as u32) as u32, y: pos.y * SCALE_FACTOR as u32 };
             println!("scaled pos: x: {0} y: {1}", display_pos.x, display_pos.y);
             let color: Color;
             if line_byte.shr(i).bitand(1) == 1 {
-                color = BLACK;
+                color = RED;
             } else {
-                color = WHITE;
+                color = GREEN;
             }
-            // println!("drawing square|||||||||||||||||||||||||||");
             self.draw_square(&mut img, display_pos, color);
+            j += 1;
         }
         
     }
     
+    fn store_bcd_representation(value: u8, dest: &mut [u8]) {
+        let factor = 10;
+        let mut input = value;
+
+        for i in (0..=2).rev() {
+            dest[i] =  input % factor;
+            input /= factor;
+        }
+    }
+
     pub fn interpret(&mut self) {
         let pause_time = time::Duration::from_millis(5);
         
@@ -256,17 +269,19 @@ impl Chip8 {
 						}
 						
 						let ram_pos = DISPLAY_BUFFER_START as u32 + (pos.x / 8) * (pos.y / 8);
-                        println!("pos put line chip: {0} {1} | addr: {2}", pos.x, pos.y, ram_pos);
+                        println!("pos put line chip: {0} {1} | {2} {3}| addr: {4}", pos.x, pos.y, pos.x / 8, pos.y / 8, ram_pos);
 						let original_val = self.ram[ram_pos as usize];
 						if reminder > 0 {
-							*(&mut self.ram[ram_pos as usize]) ^= line.shr(reminder);
+							self.ram[ram_pos as usize] ^= line.shr(reminder);
 						} else {
 							self.ram[ram_pos as usize] ^= line;
 						}
-						if original_val & !self.ram[ram_pos as usize] != 0 {     // check if bits have been flipped from 1 to 0
+                        let new_value = self.ram[ram_pos as usize];
+						if original_val & !new_value != 0 {     // check if bits have been flipped from 1 to 0
 							self.registers[0xF] = 1;
 						}
-                        self.transpose_virt_line_to_display(line, reminder, &pos);
+
+                        self.project_virt_line_to_display(new_value, reminder, &pos);
                         pos.y += 1;
 					}
 				},
@@ -281,8 +296,11 @@ impl Chip8 {
 					0x15 => self.d_timer = *self.get_mut_reg(parse_l_reg(opcode)),      // LD DTIMER, Rx
 					0x18 => self.s_timer = *self.get_mut_reg(parse_l_reg(opcode)),      // LD STIMER, Rx
 					0x1E => self.addr_reg += self.get_reg(parse_l_reg(opcode)) as u16,  // ADD Addr_R, Rx
-					0x29 => println!("opcode.0x{:04X}", opcode),
-					0x33 => println!("opcode.0x{:04X}", opcode),
+					0x29 => println!("opcode.0x{:04X}", opcode),                        // LD 
+					0x33 => Self::store_bcd_representation(                             // LD byte, Rx
+                        self.get_reg(opcode.bitand(N_MASK) as u8),
+                        &mut self.ram[self.addr_reg as usize..self.addr_reg as usize + 2]
+                    ),
 					0x55 => {                                                           // LD [I], [R]
                         for (i, register) in self.registers.iter().enumerate() {
                             self.ram[self.addr_reg as usize + i] = *register;
@@ -302,7 +320,7 @@ impl Chip8 {
             }
             // self.print_state();
 			// println!("la");
-            // std::thread::sleep(pause_time);
+            std::thread::sleep(pause_time);
         }
     }
 
