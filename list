@@ -1,3 +1,10 @@
+to do:
+	timers decrement at 60hz
+	
+
+
+
+
 components:
 	16 X 8bits reg
 	16bits Index reg

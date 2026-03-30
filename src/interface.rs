@@ -131,8 +131,8 @@ fn error_popup(error: &str) {
     println!("error: {error}.");
 }
 
-fn launch_emu(shared_buffer: Arc<Mutex<Image>>) -> std::thread::JoinHandle<()> {
-    let mut chip = Chip8::new(shared_buffer);
+fn launch_emu(shared_buffer: Arc<Mutex<Image>>, shared_key_handler: Arc<Mutex<[bool;16]>>) -> std::thread::JoinHandle<()> {
+    let mut chip = Chip8::new(shared_buffer, shared_key_handler);
         
     let emu_thread_handle = std::thread::spawn(move || {
 		
@@ -152,6 +152,141 @@ fn launch_emu(shared_buffer: Arc<Mutex<Image>>) -> std::thread::JoinHandle<()> {
     emu_thread_handle   
 }
 
+fn grab_inputs(shared_key_handler: Arc<Mutex<[bool;16]>>) {
+    // use macroquad::prelude::KeyCode;
+
+    if is_key_pressed(KeyCode::Key1) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x0] = true;
+    }
+    if is_key_pressed(KeyCode::Key2) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x1] = true;
+    }
+    if is_key_pressed(KeyCode::Key3) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x2] = true;
+    }
+    if is_key_pressed(KeyCode::Key4) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x3] = true;
+    }
+    if is_key_pressed(KeyCode::Q) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x4] = true;
+    }
+    if is_key_pressed(KeyCode::W) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x5] = true;
+    }
+    if is_key_pressed(KeyCode::E) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x6] = true;
+    }
+    if is_key_pressed(KeyCode::R) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x7] = true;
+    }
+    if is_key_pressed(KeyCode::A) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x8] = true;
+    }
+    if is_key_pressed(KeyCode::S) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x9] = true;
+    }
+    if is_key_pressed(KeyCode::D) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0xA] = true;
+    }
+    if is_key_pressed(KeyCode::F) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0xB] = true;
+    }
+    if is_key_pressed(KeyCode::Z) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0xC] = true;
+    }
+    if is_key_pressed(KeyCode::X) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0xD] = true;
+    }
+    if is_key_pressed(KeyCode::C) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0xE] = true;
+    }
+    if is_key_pressed(KeyCode::V) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0xF] = true;
+    }
+
+    if is_key_released(KeyCode::Key1) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x0] = true;
+    }
+    if is_key_released(KeyCode::Key2) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x1] = true;
+    }
+    if is_key_released(KeyCode::Key3) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x2] = true;
+    }
+    if is_key_released(KeyCode::Key4) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x3] = true;
+    }
+    if is_key_released(KeyCode::Q) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x4] = true;
+    }
+    if is_key_released(KeyCode::W) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x5] = true;
+    }
+    if is_key_released(KeyCode::E) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x6] = true;
+    }
+    if is_key_released(KeyCode::R) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x7] = true;
+    }
+    if is_key_released(KeyCode::A) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x8] = true;
+    }
+    if is_key_released(KeyCode::S) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0x9] = true;
+    }
+    if is_key_released(KeyCode::D) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0xA] = true;
+    }
+    if is_key_released(KeyCode::F) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0xB] = true;
+    }
+    if is_key_released(KeyCode::Z) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0xC] = true;
+    }
+    if is_key_released(KeyCode::X) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0xD] = true;
+    }
+    if is_key_released(KeyCode::C) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0xE] = true;
+    }
+    if is_key_released(KeyCode::V) {
+        let mut handler = shared_key_handler.lock().unwrap();
+        handler[0xF] = true;
+    }
+
+}
+
 pub async fn main_loop() {
 	let window_size = vec2(screen_width(), screen_height());
 	let render_buffer = Arc::new(Mutex::new(Image::gen_image_color(TARGET_SCREEN_WIDTH as u16, TARGET_SCREEN_HEIGH as u16, WHITE)));
@@ -159,7 +294,7 @@ pub async fn main_loop() {
 	let emu_buffer = Arc::clone(&render_buffer);
     let mut state = true;
     let mut thread_handler: Option<std::thread::JoinHandle<()>> = None;
-
+    let key_inputs = Arc::new(Mutex::new([false; 16]));
 	
 	while state == false {
 		clear_background(GRAY);
@@ -172,7 +307,7 @@ pub async fn main_loop() {
 				if ui.button(vec2(screen_width() * 0.5, 275.0), "launch ROM") {
 					// TODO
                     state = true;
-					thread_handler = Some(launch_emu(Arc::clone(&emu_buffer)));
+					thread_handler = Some(launch_emu(Arc::clone(&emu_buffer), Arc::clone(&key_inputs)));
 				}
 				if ui.button(vec2(screen_width() * 0.5, 350.0), "Quit") {
 					std::process::exit(0);
@@ -182,10 +317,11 @@ pub async fn main_loop() {
 				}
 			},
 		);
-		draw_rectangle_lines(005., 05., 100., 50.0, 10.0, RED);
+        // println!("w:{0} h:{1}", screen_width(), screen_height());
+		// draw_rectangle_lines(900., 512., 100., 50.0, 10.0, RED);
 		next_frame().await;
 	}
-    thread_handler = Some(launch_emu(Arc::clone(&emu_buffer)));
+    thread_handler = Some(launch_emu(Arc::clone(&emu_buffer), Arc::clone(&key_inputs)));
 	renderer.chip8_emu_loop().await;
     
     if thread_handler.is_some() {
